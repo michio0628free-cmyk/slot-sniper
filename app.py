@@ -2,7 +2,7 @@ import streamlit as st
 import json
 import os
 
-st.set_page_config(page_title="Slot-Sniper 朝イチ対応版", layout="wide")
+st.set_page_config(page_title="Slot-Sniper 期待値算出版", layout="wide")
 
 def load_rules():
     file_path = "machines.json"
@@ -13,7 +13,7 @@ def load_rules():
 
 rules = load_rules()
 
-st.title("🎰 Slot-Sniper：三次元スマスロ解析（朝イチ特化）")
+st.title("🎰 Slot-Sniper：三次元スマスロ解析（期待値算出版）")
 
 if not rules:
     st.error("machines.json が見つかりません。")
@@ -29,7 +29,6 @@ with col1:
     
     is_reset = st.checkbox("🌅 朝イチ設定変更（リセット）濃厚台", value=False)
     
-    # 朝イチ専用のアドバイス表示
     if is_reset and "reset_notes" in rule:
         st.info(f"**【朝イチ専用アドバイス】**\n{rule['reset_notes']}")
         
@@ -49,14 +48,15 @@ with col2:
     target_g = rule["reset_target_g"] if is_reset else rule["base_target_g"]
     ceiling_g = rule["reset_ceiling"] if is_reset else rule["normal_ceiling"]
     
+    # 冷遇・優遇・閉店時間によるボーダー補正
     if recent_diff >= rule["cold_zone_diff"]:
         target_g += 150
         score -= 25
-        alerts.append(("error", f"🥶【冷遇区間】直近差枚が+{recent_diff}枚です。ボーダーを+150G引き上げ。"))
+        alerts.append(("error", f"🥶【冷遇区間】直近差枚が+{recent_diff}枚。ボーダーを+150G引き上げ。"))
     elif recent_diff <= rule["hot_zone_diff"]:
         target_g -= 100
         score += 20
-        alerts.append(("success", f"🔥【優遇区間】直近差枚が{recent_diff}枚です。ボーダーを-100G引き下げ。"))
+        alerts.append(("success", f"🔥【優遇区間】直近差枚が{recent_diff}枚。ボーダーを-100G引き下げ。"))
 
     if current_hour >= 20:
         penalty_g = (current_hour - 19) * 80
@@ -65,9 +65,30 @@ with col2:
         alerts.append(("warning", f"⏰【閉店欠損】{current_hour}時台のため、ボーダーを+{penalty_g}G厳格化。"))
 
     rem_diff = rule["tsuranuki_diff"] - section_diff
+    
+    # 期待値（円）計算ロジック
+    # 推奨ボーダー到達で+1000円を基準とし、1Gハマるごとに約+30円として換算
+    capped_g = min(current_g, ceiling_g)
+    estimated_ev = 1000 + (capped_g - target_g) * 30
+    
     if 0 < rem_diff <= rule["tsuranuki_margin"]:
         score += 40
+        estimated_ev += 4000  # ツラヌキ直前は期待値を大幅プラス補正
         alerts.append(("success", f"🌈【ツラヌキ目前】有利区間切断ラインまで残り約{rem_diff}枚！全ツッパ推奨。"))
+
+    # あまりに低いマイナス値の丸め処理
+    if estimated_ev < -5000:
+        estimated_ev = -5000
+
+    # 期待値のデカデカ表示（Streamlitのメトリクス機能）
+    st.metric(
+        label="📊 推定期待値（現在の状態に基づく概算）", 
+        value=f"{'+' if estimated_ev > 0 else ''}{estimated_ev:,} 円",
+        delta="プラス期待値！打てます" if estimated_ev > 0 else "マイナス期待値（見送り推奨）",
+        delta_color="normal" if estimated_ev > 0 else "inverse"
+    )
+
+    st.markdown("---")
 
     if current_g >= target_g:
         score += 30
