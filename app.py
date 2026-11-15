@@ -41,24 +41,36 @@ with col1:
             with st.spinner("AIがグラフと文字を解析しています（数秒かかります）..."):
                 try:
                     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                    model = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
+                    # エラー対策：より確実な最新モデル名を指定し、JSONモード指定を解除
+                    model = genai.GenerativeModel('gemini-1.5-flash-latest')
                     img = Image.open(uploaded_file)
 
                     prompt = """
                     あなたはプロのパチスロデータアナリストです。画像から以下の4つの数値を読み取り、JSON形式で出力してください。
                     スランプグラフ画像の場合、グラフの右端（最新の点）の目盛りを読んで「現在の差枚数」を推測してください。
 
-                    【出力JSONキー】
-                    "machine": 機種名（文字列。画像から分からない場合は空文字）
-                    "current_g": 現在のハマりゲーム数（数値。分からない場合は0）
-                    "total_g": 累計ゲーム数（数値）
-                    "total_diff": スランプグラフから推測される現在の差枚数（数値。マイナスなら負の値。例: 2400, -500）
+                    【出力JSONフォーマット】
+                    ```json
+                    {
+                      "machine": "機種名（文字列。分からない場合は空文字）",
+                      "current_g": 現在のハマりゲーム数（数値。分からない場合は0）,
+                      "total_g": 累計ゲーム数（数値）,
+                      "total_diff": スランプグラフから推測される現在の差枚数（数値。マイナスなら負の値。例: 2400, -500）
+                    }
+                    ```
                     """
                     response = model.generate_content([prompt, img])
                     
-                    # AIの返答から余計な文字を削ぎ落として堅牢に読み込む
-                    raw_text = response.text.strip().removeprefix('```json').removesuffix('```').strip()
-                    result = json.loads(raw_text)
+                    raw_text = response.text.strip()
+                    # Markdownのコードブロック記号を安全に取り除く処理
+                    if raw_text.startswith("```json"):
+                        raw_text = raw_text[7:]
+                    if raw_text.startswith("```"):
+                        raw_text = raw_text[3:]
+                    if raw_text.endswith("```"):
+                        raw_text = raw_text[:-3]
+                        
+                    result = json.loads(raw_text.strip())
 
                     detected_machine = result.get("machine", "")
                     if detected_machine in rules:
@@ -71,9 +83,7 @@ with col1:
                     st.success("✅ 読み取り完了！入力枠に自動反映されました。")
 
                 except Exception as e:
-                    # ここで本当のエラー原因を画面に出力させます
                     st.error(f"⚠️ AIエラー詳細: {e}")
-                    st.info("💡 ヒント: APIキーの設定ミス（Secrets）か、Streamlitの再起動が必要な可能性が高いです。")
 
     st.markdown("---")
     st.subheader("📥 1. データカウンター入力")
