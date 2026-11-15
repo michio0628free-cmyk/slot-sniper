@@ -42,18 +42,22 @@ with col1:
                 try:
                     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
                     
-                    # 【エラー完全回避】APIキーが使えるモデルをGoogleから直接取得して自動選択
                     available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                     
                     target_model = None
-                    for pref in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro-vision', 'models/gemini-pro']:
+                    # 画像エラーから判明した、確実に使える最新の無料枠モデルを優先指定
+                    for pref in ['models/gemini-2.5-flash', 'models/gemini-3.5-flash', 'models/gemini-2.5-pro']:
                         if pref in available_models:
                             target_model = pref.replace("models/", "")
                             break
                             
+                    # 万が一指定モデルがない場合は、リストの中から「flash」と名の付く軽量モデルを安全に探す
                     if not target_model:
-                        if available_models:
-                            target_model = available_models[-1].replace("models/", "")
+                        flash_models = [m for m in available_models if 'flash' in m]
+                        if flash_models:
+                            target_model = flash_models[0].replace("models/", "")
+                        elif available_models:
+                            target_model = available_models[0].replace("models/", "")
                         else:
                             raise Exception("このAPIキーで利用できる画像解析モデルが見つかりません。")
 
@@ -100,8 +104,6 @@ with col1:
 
                 except Exception as e:
                     st.error(f"⚠️ AIエラー詳細: {e}")
-                    if 'available_models' in locals():
-                        st.warning(f"（参考）現在あなたのAPIキーで使えるモデル一覧: {', '.join(available_models)}")
 
     st.markdown("---")
     st.subheader("📥 1. データカウンター入力")
