@@ -41,8 +41,6 @@ with col1:
             with st.spinner("AIがグラフと文字を解析しています（数秒かかります）..."):
                 try:
                     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                    # エラー対策：より確実な最新モデル名を指定し、JSONモード指定を解除
-                    model = genai.GenerativeModel('gemini-1.5-flash-latest')
                     img = Image.open(uploaded_file)
 
                     prompt = """
@@ -59,10 +57,20 @@ with col1:
                     }
                     ```
                     """
-                    response = model.generate_content([prompt, img])
+                    
+                    # 404エラー対策: Flashモデルが弾かれた場合、自動的にProモデルで再試行する安全装置
+                    response = None
+                    try:
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        response = model.generate_content([prompt, img])
+                    except Exception as e1:
+                        if "404" in str(e1):
+                            model = genai.GenerativeModel('gemini-1.5-pro')
+                            response = model.generate_content([prompt, img])
+                        else:
+                            raise e1
                     
                     raw_text = response.text.strip()
-                    # Markdownのコードブロック記号を安全に取り除く処理
                     if raw_text.startswith("```json"):
                         raw_text = raw_text[7:]
                     if raw_text.startswith("```"):
