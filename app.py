@@ -6,7 +6,6 @@ from PIL import Image
 
 st.set_page_config(page_title="Slot-Sniper AI自動判定版", layout="wide")
 
-# --- 入力枠の初期値（セッションステート） ---
 if "ai_machine" not in st.session_state:
     st.session_state.ai_machine = "Lスマスロ北斗の拳"
 if "ai_current_g" not in st.session_state:
@@ -41,7 +40,6 @@ with col1:
         if st.button("✨ AIでグラフと数値を読み取る"):
             with st.spinner("AIがグラフと文字を解析しています（数秒かかります）..."):
                 try:
-                    # StreamlitのSecretsから鍵を読み込み、Geminiを起動
                     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
                     model = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
                     img = Image.open(uploaded_file)
@@ -57,9 +55,11 @@ with col1:
                     "total_diff": スランプグラフから推測される現在の差枚数（数値。マイナスなら負の値。例: 2400, -500）
                     """
                     response = model.generate_content([prompt, img])
-                    result = json.loads(response.text)
+                    
+                    # AIの返答から余計な文字を削ぎ落として堅牢に読み込む
+                    raw_text = response.text.strip().removeprefix('```json').removesuffix('```').strip()
+                    result = json.loads(raw_text)
 
-                    # AIの読み取り結果を入力枠に反映
                     detected_machine = result.get("machine", "")
                     if detected_machine in rules:
                         st.session_state.ai_machine = detected_machine
@@ -68,10 +68,12 @@ with col1:
                     st.session_state.ai_total_g = int(result.get("total_g", 0))
                     st.session_state.ai_total_diff = int(result.get("total_diff", 0))
 
-                    st.success("✅ 読み取り完了！入力枠に自動反映されました。必要に応じて微調整してください。")
+                    st.success("✅ 読み取り完了！入力枠に自動反映されました。")
 
                 except Exception as e:
-                    st.error("読み取りに失敗しました。別の画像で試すか、手動で入力してください。")
+                    # ここで本当のエラー原因を画面に出力させます
+                    st.error(f"⚠️ AIエラー詳細: {e}")
+                    st.info("💡 ヒント: APIキーの設定ミス（Secrets）か、Streamlitの再起動が必要な可能性が高いです。")
 
     st.markdown("---")
     st.subheader("📥 1. データカウンター入力")
@@ -80,9 +82,7 @@ with col1:
     rule = rules[machine_name]
     
     is_reset = st.checkbox("🌅 朝イチ設定変更（リセット）濃厚台", value=False)
-    if is_reset and "reset_notes" in rule:
-        st.info(f"**【朝イチ】** {rule['reset_notes']}")
-        
+    
     current_g = st.number_input("① 現在のハマりゲーム数 (G)", min_value=0, max_value=3000, step=10, key="ai_current_g")
     total_g = st.number_input("② 本日の総通常ゲーム数 (G)", min_value=0, max_value=10000, step=10, key="ai_total_g")
     total_diff = st.number_input("③ 現在の総差枚数 (グラフの±枚数)", step=100, key="ai_total_diff")
@@ -122,8 +122,6 @@ with col2:
         score += 40
         estimated_ev += 4000
         alerts.append(("success", f"🌈【切断目前】有利区間切断ラインまで残り約{rem_diff}枚！全ツッパ推奨。"))
-    elif total_diff < -3000:
-         alerts.append(("info", f"💡【切断遠い】ツラヌキラインまで遠いため、一撃の期待枚数は下がります。"))
 
     if estimated_ev < -5000:
         estimated_ev = -5000
