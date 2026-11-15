@@ -41,6 +41,24 @@ with col1:
             with st.spinner("AIがグラフと文字を解析しています（数秒かかります）..."):
                 try:
                     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+                    
+                    # 【エラー完全回避】APIキーが使えるモデルをGoogleから直接取得して自動選択
+                    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                    
+                    target_model = None
+                    for pref in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro-vision', 'models/gemini-pro']:
+                        if pref in available_models:
+                            target_model = pref.replace("models/", "")
+                            break
+                            
+                    if not target_model:
+                        if available_models:
+                            target_model = available_models[-1].replace("models/", "")
+                        else:
+                            raise Exception("このAPIキーで利用できる画像解析モデルが見つかりません。")
+
+                    st.info(f"💡 自動選択されたAIモデル: {target_model} で解析中...")
+                    model = genai.GenerativeModel(target_model)
                     img = Image.open(uploaded_file)
 
                     prompt = """
@@ -58,17 +76,7 @@ with col1:
                     ```
                     """
                     
-                    # 404エラー対策: Flashモデルが弾かれた場合、自動的にProモデルで再試行する安全装置
-                    response = None
-                    try:
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        response = model.generate_content([prompt, img])
-                    except Exception as e1:
-                        if "404" in str(e1):
-                            model = genai.GenerativeModel('gemini-1.5-pro')
-                            response = model.generate_content([prompt, img])
-                        else:
-                            raise e1
+                    response = model.generate_content([prompt, img])
                     
                     raw_text = response.text.strip()
                     if raw_text.startswith("```json"):
@@ -92,6 +100,8 @@ with col1:
 
                 except Exception as e:
                     st.error(f"⚠️ AIエラー詳細: {e}")
+                    if 'available_models' in locals():
+                        st.warning(f"（参考）現在あなたのAPIキーで使えるモデル一覧: {', '.join(available_models)}")
 
     st.markdown("---")
     st.subheader("📥 1. データカウンター入力")
