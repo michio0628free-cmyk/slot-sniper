@@ -1,8 +1,20 @@
 import streamlit as st
 import json
 import os
+import google.generativeai as genai
+from PIL import Image
 
-st.set_page_config(page_title="Slot-Sniper 自動判定版", layout="wide")
+st.set_page_config(page_title="Slot-Sniper AI自動判定版", layout="wide")
+
+# --- 入力枠の初期値（セッションステート） ---
+if "ai_machine" not in st.session_state:
+    st.session_state.ai_machine = "Lスマスロ北斗の拳"
+if "ai_current_g" not in st.session_state:
+    st.session_state.ai_current_g = 0
+if "ai_total_g" not in st.session_state:
+    st.session_state.ai_total_g = 0
+if "ai_total_diff" not in st.session_state:
+    st.session_state.ai_total_diff = 0
 
 def load_rules():
     file_path = "machines.json"
@@ -12,8 +24,7 @@ def load_rules():
     return {}
 
 rules = load_rules()
-
-st.title("🎰 Slot-Sniper：三次元スマスロ解析（自動判定版）")
+st.title("🎰 Slot-Sniper：AI自動解析（Vision AI搭載版）")
 
 if not rules:
     st.error("machines.json が見つかりません。")
@@ -22,21 +33,59 @@ if not rules:
 col1, col2 = st.columns([1, 1.2])
 
 with col1:
+    st.subheader("📸 画像からAI自動入力")
+    st.caption("データサイトのスクショ（スランプグラフ含む）を選択してください。")
+    uploaded_file = st.file_uploader("", type=["jpg", "png", "jpeg"])
+
+    if uploaded_file is not None:
+        if st.button("✨ AIでグラフと数値を読み取る"):
+            with st.spinner("AIがグラフと文字を解析しています（数秒かかります）..."):
+                try:
+                    # StreamlitのSecretsから鍵を読み込み、Geminiを起動
+                    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+                    model = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
+                    img = Image.open(uploaded_file)
+
+                    prompt = """
+                    あなたはプロのパチスロデータアナリストです。画像から以下の4つの数値を読み取り、JSON形式で出力してください。
+                    スランプグラフ画像の場合、グラフの右端（最新の点）の目盛りを読んで「現在の差枚数」を推測してください。
+
+                    【出力JSONキー】
+                    "machine": 機種名（文字列。画像から分からない場合は空文字）
+                    "current_g": 現在のハマりゲーム数（数値。分からない場合は0）
+                    "total_g": 累計ゲーム数（数値）
+                    "total_diff": スランプグラフから推測される現在の差枚数（数値。マイナスなら負の値。例: 2400, -500）
+                    """
+                    response = model.generate_content([prompt, img])
+                    result = json.loads(response.text)
+
+                    # AIの読み取り結果を入力枠に反映
+                    detected_machine = result.get("machine", "")
+                    if detected_machine in rules:
+                        st.session_state.ai_machine = detected_machine
+                    
+                    st.session_state.ai_current_g = int(result.get("current_g", 0))
+                    st.session_state.ai_total_g = int(result.get("total_g", 0))
+                    st.session_state.ai_total_diff = int(result.get("total_diff", 0))
+
+                    st.success("✅ 読み取り完了！入力枠に自動反映されました。必要に応じて微調整してください。")
+
+                except Exception as e:
+                    st.error("読み取りに失敗しました。別の画像で試すか、手動で入力してください。")
+
+    st.markdown("---")
     st.subheader("📥 1. データカウンター入力")
-    st.caption("ホールのデータ表示機の数値をそのまま入力してください。")
     
-    machine_name = st.selectbox("機種を選択", list(rules.keys()))
+    machine_name = st.selectbox("機種を選択", list(rules.keys()), key="ai_machine")
     rule = rules[machine_name]
     
     is_reset = st.checkbox("🌅 朝イチ設定変更（リセット）濃厚台", value=False)
     if is_reset and "reset_notes" in rule:
         st.info(f"**【朝イチ】** {rule['reset_notes']}")
         
-    current_g = st.number_input("① 現在のハマりゲーム数 (G)", min_value=0, max_value=3000, value=100, step=10)
-    
-    st.markdown("---")
-    total_g = st.number_input("② 本日の総通常ゲーム数 (G)", min_value=0, max_value=10000, value=0, step=100)
-    total_diff = st.number_input("③ 現在の総差枚数 (グラフの±枚数)", value=0, step=100)
+    current_g = st.number_input("① 現在のハマりゲーム数 (G)", min_value=0, max_value=3000, step=10, key="ai_current_g")
+    total_g = st.number_input("② 本日の総通常ゲーム数 (G)", min_value=0, max_value=10000, step=10, key="ai_total_g")
+    total_diff = st.number_input("③ 現在の総差枚数 (グラフの±枚数)", step=100, key="ai_total_diff")
     current_hour = st.slider("④ 現在の時刻", min_value=9, max_value=22, value=10)
 
 with col2:
@@ -47,28 +96,24 @@ with col2:
     target_g = rule["reset_target_g"] if is_reset else rule["base_target_g"]
     ceiling_g = rule["reset_ceiling"] if is_reset else rule["normal_ceiling"]
     
-    # --- 総ゲーム数と差枚数からの自動判定ロジック ---
     if total_diff >= rule.get("cold_zone_diff", 1500):
         target_g += 150
         score -= 25
         alerts.append(("error", f"🥶【冷遇警戒】差枚が+{total_diff}枚です。ボーダーを+150G厳格化。"))
     elif total_diff <= rule.get("hot_zone_diff", -1000):
         bonus_g = 100
-        # 深い吸い込みで総ゲーム数が多いほど強く優遇
         if total_g >= 3000 and total_diff <= -2000:
             bonus_g = 200 
         target_g -= bonus_g
         score += 20
         alerts.append(("success", f"🔥【優遇区間】総G数{total_g}Gで{total_diff}枚。ボーダーを-{bonus_g}G引き下げ。"))
 
-    # 閉店欠損
     if current_hour >= 20:
         penalty_g = (current_hour - 19) * 80
         target_g += penalty_g
         score -= 15
         alerts.append(("warning", f"⏰【閉店欠損】{current_hour}時台のため、ボーダーを+{penalty_g}G厳格化。"))
 
-    # 有利区間切断までの概算距離
     rem_diff = rule["tsuranuki_diff"] - total_diff
     capped_g = min(current_g, ceiling_g)
     estimated_ev = 1000 + (capped_g - target_g) * 30
