@@ -33,25 +33,26 @@ col1, col2 = st.columns([1, 1.2])
 
 with col1:
     st.subheader("📸 画像からAI自動入力")
-    st.caption("データサイトのスクショ（スランプグラフ含む）を選択してください。")
-    uploaded_file = st.file_uploader("", type=["jpg", "png", "jpeg"])
+    st.caption("データサイトのスクショ（スランプグラフやデータ一覧など複数選択可）を選択してください。")
+    
+    # 複数ファイルアップロードを許可（accept_multiple_files=Trueを追加）
+    uploaded_files = st.file_uploader("", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
 
-    if uploaded_file is not None:
+    # 1枚以上の画像がアップロードされていれば実行可能に
+    if uploaded_files:
         if st.button("✨ AIでグラフと数値を読み取る"):
-            with st.spinner("AIがグラフと文字を解析しています（数秒かかります）..."):
+            with st.spinner("AIが複数の画像を解析しています（数秒かかります）..."):
                 try:
                     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
                     
                     available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                     
                     target_model = None
-                    # 画像エラーから判明した、確実に使える最新の無料枠モデルを優先指定
                     for pref in ['models/gemini-2.5-flash', 'models/gemini-3.5-flash', 'models/gemini-2.5-pro']:
                         if pref in available_models:
                             target_model = pref.replace("models/", "")
                             break
                             
-                    # 万が一指定モデルがない場合は、リストの中から「flash」と名の付く軽量モデルを安全に探す
                     if not target_model:
                         flash_models = [m for m in available_models if 'flash' in m]
                         if flash_models:
@@ -63,11 +64,13 @@ with col1:
 
                     st.info(f"💡 自動選択されたAIモデル: {target_model} で解析中...")
                     model = genai.GenerativeModel(target_model)
-                    img = Image.open(uploaded_file)
+                    
+                    # アップロードされた複数の画像をすべてリスト化して読み込む
+                    imgs = [Image.open(file) for file in uploaded_files]
 
                     prompt = """
-                    あなたはプロのパチスロデータアナリストです。画像から以下の4つの数値を読み取り、JSON形式で出力してください。
-                    スランプグラフ画像の場合、グラフの右端（最新の点）の目盛りを読んで「現在の差枚数」を推測してください。
+                    あなたはプロのパチスロデータアナリストです。提供された複数の画像から情報を総合的に判断し、以下の4つの数値を読み取ってJSON形式で出力してください。
+                    スランプグラフ画像が含まれている場合、グラフの右端（最新の点）の目盛りを読んで「現在の差枚数」を推測してください。
 
                     【出力JSONフォーマット】
                     ```json
@@ -80,7 +83,8 @@ with col1:
                     ```
                     """
                     
-                    response = model.generate_content([prompt, img])
+                    # プロンプトと複数の画像をまとめてAIに送信
+                    response = model.generate_content([prompt] + imgs)
                     
                     raw_text = response.text.strip()
                     if raw_text.startswith("```json"):
